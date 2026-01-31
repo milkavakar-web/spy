@@ -32,11 +32,12 @@
             justify-content:center;
             padding: 18px 12px 32px;
         }
-        .app{width:min(560px,100%);}
+        .app{width:min(720px,100%);}
         .header{
             display:flex; align-items:center; justify-content:space-between;
             margin: 6px 0 14px;
             gap: 12px;
+            flex-wrap:wrap;
         }
         .title{
             font-weight:800; font-size:20px; letter-spacing:.2px;
@@ -57,7 +58,7 @@
             backdrop-filter: blur(6px);
         }
         .row{display:flex; gap:12px; flex-wrap:wrap;}
-        .col{flex:1; min-width: 180px;}
+        .col{flex:1; min-width: 220px;}
         label{display:block; font-size:12px; color:var(--muted); margin:8px 0 6px;}
         input[type="number"], select, input[type="text"]{
             width:100%;
@@ -69,7 +70,7 @@
             outline:none;
             font-size:16px;
         }
-        input[type="text"]{letter-spacing:.3px;}
+        input[type="text"]{letter-spacing:.2px;}
         .btnbar{display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;}
         button{
             cursor:pointer;
@@ -145,22 +146,86 @@
         .footer{
             margin-top:12px; color:var(--muted); font-size:12px; text-align:center;
         }
+
+        /* phone-friendly +/- rows */
+        .numRow{display:flex; gap:10px; align-items:center; flex-wrap:nowrap;}
+        .numBtn{min-width:54px; padding:12px 0; font-size:20px; font-weight:900;}
+
+        /* My words management */
+        .section{
+            margin-top: 14px;
+            padding: 12px;
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            background: rgba(255,255,255,.03);
+        }
+        .sectionTitle{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:12px;
+            flex-wrap:wrap;
+            margin-bottom: 8px;
+        }
+        .sectionTitle b{font-size:14px;}
+        .miniBtn{
+            padding:8px 10px;
+            font-size:13px;
+            border-radius:10px;
+        }
+        .chips{
+            display:flex;
+            gap:8px;
+            flex-wrap:wrap;
+            margin-top: 8px;
+        }
+        .chip{
+            display:inline-flex;
+            align-items:center;
+            gap:8px;
+            padding:8px 10px;
+            border-radius:999px;
+            border:1px solid var(--border);
+            background: rgba(255,255,255,.03);
+            color: var(--text);
+            font-size:13px;
+            line-height:1;
+            max-width: 100%;
+        }
+        .chip small{color:var(--muted);}
+        .xBtn{
+            border:none;
+            background: rgba(255,255,255,.08);
+            color: var(--text);
+            border-radius: 999px;
+            padding: 4px 8px;
+            cursor:pointer;
+            font-weight:900;
+        }
+        .dangerLink{
+            color: var(--danger);
+            text-decoration: underline;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
 <div class="app">
     <div class="header">
-        <div class="title">🕵️ Шпион <span class="badge">words.xlsx • без сохранений</span></div>
+        <div class="title">🕵️ Шпион </div>
         <div id="phaseBadge" class="pill">…</div>
     </div>
     <div id="root" class="card"></div>
-    <div class="footer">Чтобы обновить слова — просто замени words.xlsx в репозитории.</div>
+    <div class="footer"></div>
 </div>
 
 <script>
     (() => {
         const $ = (sel) => document.querySelector(sel);
 
+        // ---------- utils ----------
         function shuffle(arr){
             const a = arr.slice();
             for(let i=a.length-1;i>0;i--){
@@ -185,87 +250,64 @@
                 .replace(/[ё]/g, "е")
                 .replace(/[^a-zа-я0-9 ]/gi, "");
         }
+        function cleanName(str){
+            return (str || "").trim().replace(/\s+/g, " ");
+        }
         function makeSpySet(players, spies){
             const idxs = shuffle([...Array(players).keys()]).slice(0, spies);
             return new Set(idxs);
         }
         function directionLabel(dir){ return dir === "cw" ? "по часовой" : "против часовой"; }
 
-        // ====== WORDBOOK (from Excel) ======
-        // state.wordbook: { "Все": [...], "Еда": [...], ... }
-        async function loadWordsFromExcel() {
-            state.wordbookStatus = "loading";
-            state.wordbookError = null;
-            render();
+        // ---------- LocalStorage user words ----------
+        const USER_WORDS_KEY = "spy_user_words_v1";
 
-            try {
-                if (!window.XLSX) throw new Error("XLSX library not loaded");
-
-                const res = await fetch("./words.xlsx", { cache: "no-store" });
-                if (!res.ok) throw new Error(`words.xlsx not found (HTTP ${res.status})`);
-
-                const ab = await res.arrayBuffer();
-                const wb = XLSX.read(ab, { type: "array" });
-                const sheetName = wb.SheetNames[0];
-                if (!sheetName) throw new Error("No sheets in words.xlsx");
-                const ws = wb.Sheets[sheetName];
-
-                const rows = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
-
-                // Allow headers: category/word (case-insensitive)
-                const packs = {};
-                const seen = new Set();
-
-                for (const r of rows) {
-                    const keys = Object.keys(r);
-                    const get = (name) => {
-                        const k = keys.find(x => String(x).toLowerCase().trim() === name);
-                        return k ? r[k] : "";
-                    };
-
-                    const category = String(get("category")).trim();
-                    const word = String(get("word")).trim();
-                    if (!category || !word) continue;
-
-                    const dedupKey = `${category}||${word}`.toLowerCase();
-                    if (seen.has(dedupKey)) continue;
-                    seen.add(dedupKey);
-
-                    if (!packs[category]) packs[category] = [];
-                    packs[category].push(word);
+        function loadUserWords(){
+            try{
+                const raw = localStorage.getItem(USER_WORDS_KEY);
+                if (!raw) return {};
+                const obj = JSON.parse(raw);
+                if (!obj || typeof obj !== "object") return {};
+                // expect { [category]: [word, ...] }
+                for (const k of Object.keys(obj)){
+                    if (!Array.isArray(obj[k])) obj[k] = [];
+                    obj[k] = obj[k].map(x => cleanName(String(x))).filter(Boolean);
                 }
-
-                const all = Object.values(packs).flat();
-                packs["Все"] = all;
-
-                if (all.length === 0) {
-                    state.wordbookStatus = "empty";
-                    state.wordbook = { "Все": [] };
-                } else {
-                    state.wordbookStatus = "loaded";
-                    state.wordbook = packs;
-
-                    // если выбранной категории больше нет — откатим на "Все"
-                    if (!state.wordbook[state.settings.pack]) {
-                        state.settings.pack = "Все";
-                    }
-                }
-            } catch (e) {
-                state.wordbookStatus = "error";
-                state.wordbookError = e?.message || String(e);
-                state.wordbook = { "Все": [] };
+                return obj;
+            } catch(e){
+                return {};
             }
-
-            render();
         }
 
-        function getPackNames() {
-            const keys = Object.keys(state.wordbook || {});
-            const others = keys.filter(k => k !== "Все").sort((a,b) => a.localeCompare(b, "ru"));
-            return ["Все", ...others.filter(k => k !== "Все")];
+        function saveUserWords(){
+            try{
+                localStorage.setItem(USER_WORDS_KEY, JSON.stringify(state.userWords));
+            } catch(e){
+                alert("Не удалось сохранить. Возможно, браузер запрещает LocalStorage или не хватает места.");
+            }
         }
 
-        // ====== STATE ======
+        function dedupWords(words){
+            const out = [];
+            const seen = new Set();
+            for (const w of words){
+                const n = normalizeWord(w);
+                if (!n) continue;
+                if (seen.has(n)) continue;
+                seen.add(n);
+                out.push(w);
+            }
+            return out;
+        }
+
+        function userCategoriesSorted(){
+            return Object.keys(state.userWords)
+                .map(cleanName)
+                .filter(Boolean)
+                .sort((a,b) => a.localeCompare(b, "ru"));
+        }
+
+        // ---------- state ----------
         const state = {
             phase: "setup",
             settings: {
@@ -273,7 +315,7 @@
                 spies: 1,
                 timerMode: "5",
                 pack: "Все",
-                customWord: "" // одноразово
+                customWord: ""
             },
 
             // runtime
@@ -291,10 +333,21 @@
             spycall: { input: "", returnPhase: "round" },
             result: { winner: null, spyWon: false, endedBy: null },
 
-            // wordbook
-            wordbook: { "Все": [] },
-            wordbookStatus: "loading", // loading | loaded | empty | error
-            wordbookError: null
+            // base wordbook from excel
+            baseWordbook: { },                 // categories only (no "Все")
+            baseStatus: "loading",             // loading | loaded | empty | error
+            baseError: null,
+
+            // user wordbook from localStorage
+            userWords: loadUserWords(),        // { category: [word...] }
+            manage: {
+                newCategoryName: "",
+                addToCategory: "",
+                newWord: ""
+            },
+
+            // merged packs used by the game
+            wordbook: { "Все": [] },           // includes base + user, with "Все"
         };
 
         function setPhase(phase){ state.phase = phase; render(); }
@@ -319,25 +372,200 @@
             state.spycall = { input: "", returnPhase: "round" };
             state.result = { winner: null, spyWon: false, endedBy: null };
         }
-
         function finalizeStartOrder(){
             state.round.startPlayer = randInt(1, state.settings.players);
             state.round.direction = (Math.random() < 0.5) ? "cw" : "ccw";
         }
 
-        // ====== GAME FLOW ======
+        // ---------- merge base + user into state.wordbook ----------
+        function rebuildMergedWordbook(){
+            // start from base
+            const merged = {};
+            for (const cat of Object.keys(state.baseWordbook || {})){
+                const baseWords = Array.isArray(state.baseWordbook[cat]) ? state.baseWordbook[cat] : [];
+                merged[cat] = dedupWords(baseWords.map(cleanName));
+            }
+
+            // overlay user words (merge by category name)
+            for (const catRaw of Object.keys(state.userWords || {})){
+                const cat = cleanName(catRaw);
+                if (!cat) continue;
+                const userList = Array.isArray(state.userWords[catRaw]) ? state.userWords[catRaw] : [];
+                const combined = (merged[cat] || []).concat(userList.map(cleanName));
+                merged[cat] = dedupWords(combined);
+            }
+
+            // build "Все"
+            const all = Object.values(merged).flat();
+            const allDedup = dedupWords(all);
+
+            // final wordbook with "Все"
+            const finalBook = { "Все": allDedup };
+            // stable ordering for UI (alphabetical)
+            const cats = Object.keys(merged).sort((a,b)=>a.localeCompare(b, "ru"));
+            for (const c of cats) finalBook[c] = merged[c];
+
+            state.wordbook = finalBook;
+
+            // keep current selection valid
+            if (!state.wordbook[state.settings.pack]) {
+                state.settings.pack = "Все";
+            }
+        }
+
+        function getPackNames(){
+            const keys = Object.keys(state.wordbook || {});
+            const others = keys.filter(k => k !== "Все").sort((a,b) => a.localeCompare(b, "ru"));
+            return ["Все", ...others];
+        }
+
+        // ---------- load base words from excel ----------
+        async function loadWordsFromExcel(){
+            state.baseStatus = "loading";
+            state.baseError = null;
+            render();
+
+            try{
+                if (!window.XLSX) throw new Error("XLSX library not loaded");
+
+                const res = await fetch("./words.xlsx", { cache: "no-store" });
+                if (!res.ok) throw new Error(`words.xlsx not found (HTTP ${res.status})`);
+
+                const ab = await res.arrayBuffer();
+                const wb = XLSX.read(ab, { type: "array" });
+                const sheetName = wb.SheetNames[0];
+                if (!sheetName) throw new Error("No sheets in words.xlsx");
+                const ws = wb.Sheets[sheetName];
+
+                const rows = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
+
+                const packs = {};
+                const seen = new Set(); // dedup base by category||word normalized
+
+                for (const r of rows){
+                    const keys = Object.keys(r);
+                    const get = (name) => {
+                        const k = keys.find(x => String(x).toLowerCase().trim() === name);
+                        return k ? r[k] : "";
+                    };
+
+                    const category = cleanName(String(get("category")));
+                    const word = cleanName(String(get("word")));
+                    if (!category || !word) continue;
+
+                    const dedupKey = `${category}||${normalizeWord(word)}`;
+                    if (seen.has(dedupKey)) continue;
+                    seen.add(dedupKey);
+
+                    if (!packs[category]) packs[category] = [];
+                    packs[category].push(word);
+                }
+
+                const total = Object.values(packs).flat().length;
+                if (total === 0){
+                    state.baseStatus = "empty";
+                    state.baseWordbook = {};
+                } else {
+                    state.baseStatus = "loaded";
+                    // dedup within each category just in case
+                    for (const c of Object.keys(packs)) packs[c] = dedupWords(packs[c]);
+                    state.baseWordbook = packs;
+                }
+            } catch(e){
+                state.baseStatus = "error";
+                state.baseError = e?.message || String(e);
+                state.baseWordbook = {};
+            }
+
+            rebuildMergedWordbook();
+            render();
+        }
+
+        // ---------- user words actions ----------
+        function addCategory(){
+            const name = cleanName(state.manage.newCategoryName);
+            if (!name){
+                alert("Введите название категории.");
+                return;
+            }
+            if (!state.userWords[name]) state.userWords[name] = [];
+            state.manage.newCategoryName = "";
+            // default add-to category = this one
+            state.manage.addToCategory = name;
+            saveUserWords();
+            rebuildMergedWordbook();
+            render();
+        }
+
+        function addWord(){
+            const cat = cleanName(state.manage.addToCategory);
+            const word = cleanName(state.manage.newWord);
+            if (!cat){
+                alert("Выберите категорию.");
+                return;
+            }
+            if (!word){
+                alert("Введите слово.");
+                return;
+            }
+
+            if (!state.userWords[cat]) state.userWords[cat] = [];
+            const combined = state.userWords[cat].concat([word]);
+            state.userWords[cat] = dedupWords(combined);
+            state.manage.newWord = "";
+
+            saveUserWords();
+            rebuildMergedWordbook();
+            render();
+        }
+
+        function deleteUserWord(category, word){
+            const cat = cleanName(category);
+            if (!state.userWords[cat]) return;
+            state.userWords[cat] = state.userWords[cat].filter(w => normalizeWord(w) !== normalizeWord(word));
+            if (state.userWords[cat].length === 0){
+                // keep empty category? better keep (user may want), but user asked can delete themselves
+                // We'll keep empty category so it stays visible; but allow delete category button.
+            }
+            saveUserWords();
+            rebuildMergedWordbook();
+            render();
+        }
+
+        function deleteUserCategory(category){
+            const cat = cleanName(category);
+            if (!state.userWords[cat]) return;
+            if (!confirm(`Удалить категорию "${cat}" и все добавленные в неё слова?`)) return;
+            delete state.userWords[cat];
+            saveUserWords();
+            rebuildMergedWordbook();
+            render();
+        }
+
+        function clearAllUserWords(){
+            if (!confirm("Удалить ВСЕ ваши категории и слова (LocalStorage)?")) return;
+            state.userWords = {};
+            state.manage.newCategoryName = "";
+            state.manage.addToCategory = "";
+            state.manage.newWord = "";
+            saveUserWords();
+            rebuildMergedWordbook();
+            render();
+        }
+
+        // ---------- game flow ----------
         function startGame(){
             resetRuntimeKeepSettings();
 
             const custom = (state.settings.customWord || "").trim();
             if (custom){
                 state.word = custom;
-                state.settings.customWord = ""; // одноразовое
+                state.settings.customWord = ""; // one-time
             } else {
                 const pack = state.settings.pack || "Все";
                 const words = (state.wordbook[pack] || []).filter(Boolean);
                 if (!words.length){
-                    alert("В выбранной категории нет слов. Проверь words.xlsx или выбери другую категорию.");
+                    alert("В выбранной категории нет слов. Добавьте слова или выберите другую категорию.");
                     return;
                 }
                 state.word = pickRandom(words);
@@ -462,7 +690,7 @@
         }
         function playAgainSameSettings(){ startGame(); }
 
-        // ====== UI ======
+        // ---------- UI ----------
         function phaseTitle(){
             switch(state.phase){
                 case "setup": return "Настройка";
@@ -483,34 +711,63 @@
 
             // ---- SETUP ----
             if (state.phase === "setup"){
-                const packs = getPackNames();
-                const canUseExcel = state.wordbookStatus === "loaded";
-                const hasCustom = (state.settings.customWord || "").trim().length > 0;
+                // ensure merged wordbook is current (in case userWords loaded before excel)
+                rebuildMergedWordbook();
 
-                const packOptions = (state.wordbookStatus === "loaded")
-                    ? packs.map(name => {
-                        const n = (state.wordbook[name] || []).length;
-                        return `<option value="${name}" ${state.settings.pack===name?"selected":""}>${name} (${n})</option>`;
-                    }).join("")
-                    : `<option value="Все">Загрузка words.xlsx…</option>`;
+                const packs = getPackNames();
+                const canPickPack = (packs.length > 0);
+
+                const packOptions = packs.map(name => {
+                    const n = (state.wordbook[name] || []).length;
+                    return `<option value="${name}" ${state.settings.pack===name?"selected":""}>${name} (${n})</option>`;
+                }).join("");
+
+                // manage-category list for adding word (exclude "Все")
+                const addCatOptions = packs
+                    .filter(n => n !== "Все")
+                    .map(name => `<option value="${name}" ${cleanName(state.manage.addToCategory)===name?"selected":""}>${name}</option>`)
+                    .join("");
+
+                // excel status text
+                let baseStatusText = "";
+                if (state.baseStatus === "loading") baseStatusText = "⏳ Загружаю базовые слова из words.xlsx…";
+                if (state.baseStatus === "loaded"){
+                    const baseTotal = Object.values(state.baseWordbook).flat().length;
+                    baseStatusText = `✅ Базовых слов: ${baseTotal}.`;
+                }
+                if (state.baseStatus === "empty") baseStatusText = "⚠️ words.xlsx прочитан, но слов не найдено (проверь колонки category/word).";
+                if (state.baseStatus === "error") baseStatusText = `❌ Не удалось загрузить words.xlsx: ${state.baseError || "unknown error"}.`;
+
+                const userCats = userCategoriesSorted();
 
                 root.innerHTML = `
-        <div class="note" id="excelStatus"></div>
+        <div class="note" id="statusBox"></div>
 
         <div class="row">
           <div class="col">
             <label>Количество игроков</label>
-            <input id="players" type="number" min="3" max="20" value="${state.settings.players}" />
+            <div class="numRow">
+              <button id="playersMinus" type="button" class="numBtn">−</button>
+              <input id="players" type="text" inputmode="numeric" pattern="[0-9]*" value="${state.settings.players}" />
+              <button id="playersPlus" type="button" class="numBtn">+</button>
+            </div>
+            <div class="hint">Введи любое число (минимум 3).</div>
           </div>
+
           <div class="col">
             <label>Количество шпионов</label>
-            <input id="spies" type="number" min="1" max="10" value="${state.settings.spies}" />
+            <div class="numRow">
+              <button id="spiesMinus" type="button" class="numBtn">−</button>
+              <input id="spies" type="text" inputmode="numeric" pattern="[0-9]*" value="${state.settings.spies}" />
+              <button id="spiesPlus" type="button" class="numBtn">+</button>
+            </div>
+            <div class="hint">Любое число, но меньше количества игроков.</div>
           </div>
         </div>
 
         <label>Своё слово (опционально, одноразово)</label>
         <input id="customWord" type="text" placeholder="Например: Шрек" value="${state.settings.customWord || ""}" />
-        <div class="hint">Если заполнено — категория игнорируется. После старта игры поле очистится автоматически.</div>
+        <div class="hint">Если заполнено — категории игнорируются. После старта игры поле очистится автоматически.</div>
 
         <div class="row">
           <div class="col">
@@ -525,8 +782,8 @@
           </div>
 
           <div class="col">
-            <label>Категория (из words.xlsx)</label>
-            <select id="pack" ${canUseExcel ? "" : "disabled"}>
+            <label>Категория для игры (база + мои слова)</label>
+            <select id="pack" ${canPickPack ? "" : "disabled"}>
               ${packOptions}
             </select>
           </div>
@@ -538,23 +795,50 @@
           <button class="primary" id="startBtn">Начать игру</button>
         </div>
 
-        <div class="hint">
-          Файлы должны лежать рядом: <b>index.html</b> и <b>words.xlsx</b> в одной папке на GitHub Pages.
+        <div class="section">
+          <div class="sectionTitle">
+            <b>Мои слова (сохраняются на устройстве)</b>
+            <button class="miniBtn danger" id="clearAllBtn" ${userCats.length ? "" : "disabled"}>Удалить всё</button>
+          </div>
+
+          <div class="row">
+            <div class="col">
+              <label>Новая категория</label>
+              <input id="newCategory" type="text" placeholder="Например: Игры" value="${state.manage.newCategoryName || ""}" />
+              <div class="btnbar" style="margin-top:10px;">
+                <button class="ok" id="addCategoryBtn">Добавить категорию</button>
+              </div>
+            </div>
+
+            <div class="col">
+              <label>Добавить слово в категорию</label>
+              <select id="addToCategory">
+                <option value="" ${!state.manage.addToCategory ? "selected" : ""}>— выбери категорию —</option>
+                ${addCatOptions}
+              </select>
+              <label>Слово</label>
+              <input id="newWord" type="text" placeholder="Например: Ведьмак" value="${state.manage.newWord || ""}" />
+              <div class="btnbar" style="margin-top:10px;">
+                <button class="ok" id="addWordBtn">Добавить слово</button>
+              </div>
+              <div class="hint">Можно добавлять слова и в “базовые” категории — они просто будут храниться как ваши.</div>
+            </div>
+          </div>
+
+          <div class="hr"></div>
+          <div class="hint" style="margin-top:0;">
+            Ниже показаны только слова, которые добавили вы:
+          </div>
+
+          <div id="userWordsList"></div>
         </div>
       `;
 
-                // excel status
-                const excelStatus = $("#excelStatus");
-                if (state.wordbookStatus === "loading") {
-                    excelStatus.textContent = "⏳ Загружаю words.xlsx…";
-                } else if (state.wordbookStatus === "loaded") {
-                    const total = (state.wordbook["Все"] || []).length;
-                    excelStatus.textContent = `✅ words.xlsx загружен. Всего слов: ${total}. Категорий: ${getPackNames().length - 1}.`;
-                } else if (state.wordbookStatus === "empty") {
-                    excelStatus.textContent = "⚠️ words.xlsx прочитан, но слов не найдено. Проверь колонки 'category' и 'word'.";
-                } else if (state.wordbookStatus === "error") {
-                    excelStatus.textContent = `❌ Не удалось загрузить words.xlsx: ${state.wordbookError || "unknown error"}. (Можно сыграть со “своим словом”.)`;
-                }
+                // status box text
+                const statusBox = $("#statusBox");
+                const totalMerged = (state.wordbook["Все"] || []).length;
+                const userTotal = Object.values(state.userWords || {}).flat().length;
+                statusBox.textContent = `${baseStatusText} ⭐ Всего слов (с учётом моих): ${totalMerged}. Мои слова: ${userTotal}.`;
 
                 const playersEl = $("#players");
                 const spiesEl = $("#spies");
@@ -564,18 +848,31 @@
                 const noteEl = $("#setupNote");
                 const startBtn = $("#startBtn");
 
+                const playersMinus = $("#playersMinus");
+                const playersPlus  = $("#playersPlus");
+                const spiesMinus   = $("#spiesMinus");
+                const spiesPlus    = $("#spiesPlus");
+
+                // manage controls
+                const newCategoryEl = $("#newCategory");
+                const addCategoryBtn = $("#addCategoryBtn");
+                const addToCategoryEl = $("#addToCategory");
+                const newWordEl = $("#newWord");
+                const addWordBtn = $("#addWordBtn");
+                const clearAllBtn = $("#clearAllBtn");
+
                 function validateAndFix(){
                     let players = parseInt(playersEl.value, 10);
                     if (Number.isNaN(players)) players = 6;
-                    players = Math.max(3, Math.min(20, players));
+                    players = Math.max(3, players);
 
                     let spies = parseInt(spiesEl.value, 10);
                     if (Number.isNaN(spies)) spies = 1;
-                    spies = Math.max(1, Math.min(10, spies));
+                    spies = Math.max(1, spies);
                     if (spies >= players) spies = players - 1;
 
-                    playersEl.value = players;
-                    spiesEl.value = spies;
+                    playersEl.value = String(players);
+                    spiesEl.value = String(spies);
 
                     state.settings.players = players;
                     state.settings.spies = spies;
@@ -590,23 +887,40 @@
                     if (hasCustomNow) {
                         warnings.push("✅ Будет использовано своё слово (одноразово).");
                     } else {
-                        if (state.wordbookStatus !== "loaded") {
-                            warnings.push("⛔ Нужен words.xlsx с колонками category/word (или введи своё слово).");
-                        } else {
-                            const count = (state.wordbook[state.settings.pack] || []).length;
-                            warnings.push(count ? `✅ Категория выбрана: ${state.settings.pack} (${count})` : "⚠️ В этой категории нет слов.");
-                        }
+                        const count = (state.wordbook[state.settings.pack] || []).length;
+                        warnings.push(count ? `✅ В категории "${state.settings.pack}" слов: ${count}` : "⚠️ В этой категории нет слов.");
                     }
 
                     noteEl.textContent = warnings.join(" ");
 
-                    // enable start if custom word OR excel loaded with at least 1 word in selected pack
                     let okToStart = false;
                     if (hasCustomNow) okToStart = true;
-                    else if (state.wordbookStatus === "loaded" && (state.wordbook[state.settings.pack] || []).length > 0) okToStart = true;
+                    else if ((state.wordbook[state.settings.pack] || []).length > 0) okToStart = true;
 
                     startBtn.disabled = !okToStart;
                 }
+
+                // +/- handlers
+                playersMinus.addEventListener("click", () => {
+                    const v = parseInt(playersEl.value, 10);
+                    playersEl.value = String((Number.isNaN(v) ? 6 : v) - 1);
+                    validateAndFix();
+                });
+                playersPlus.addEventListener("click", () => {
+                    const v = parseInt(playersEl.value, 10);
+                    playersEl.value = String((Number.isNaN(v) ? 6 : v) + 1);
+                    validateAndFix();
+                });
+                spiesMinus.addEventListener("click", () => {
+                    const v = parseInt(spiesEl.value, 10);
+                    spiesEl.value = String((Number.isNaN(v) ? 1 : v) - 1);
+                    validateAndFix();
+                });
+                spiesPlus.addEventListener("click", () => {
+                    const v = parseInt(spiesEl.value, 10);
+                    spiesEl.value = String((Number.isNaN(v) ? 1 : v) + 1);
+                    validateAndFix();
+                });
 
                 playersEl.addEventListener("input", validateAndFix);
                 spiesEl.addEventListener("input", validateAndFix);
@@ -614,8 +928,69 @@
                 if (packEl) packEl.addEventListener("change", validateAndFix);
                 customEl.addEventListener("input", validateAndFix);
 
-                validateAndFix();
                 startBtn.addEventListener("click", startGame);
+
+                // manage handlers
+                newCategoryEl.addEventListener("input", () => state.manage.newCategoryName = newCategoryEl.value);
+                addToCategoryEl.addEventListener("change", () => state.manage.addToCategory = addToCategoryEl.value);
+                newWordEl.addEventListener("input", () => state.manage.newWord = newWordEl.value);
+
+                addCategoryBtn.addEventListener("click", addCategory);
+                addWordBtn.addEventListener("click", addWord);
+                clearAllBtn.addEventListener("click", clearAllUserWords);
+
+                // render user words list
+                const listHost = $("#userWordsList");
+                const cats = userCategoriesSorted();
+
+                if (!cats.length){
+                    listHost.innerHTML = `<div class="note">Пока нет ваших категорий/слов. Добавь категорию и слова — они сохранятся после перезахода.</div>`;
+                } else {
+                    const blocks = cats.map(cat => {
+                        const words = dedupWords((state.userWords[cat] || []).map(cleanName));
+                        const chips = words.length ? `
+            <div class="chips">
+              ${words.map(w => `
+                <div class="chip">
+                  <span>${w}</span>
+                  <button class="xBtn" data-delword="${encodeURIComponent(cat)}||${encodeURIComponent(w)}">×</button>
+                </div>
+              `).join("")}
+            </div>
+          ` : `<div class="hint">В этой категории пока нет ваших слов.</div>`;
+
+                        return `
+            <div class="section" style="margin-top:10px;">
+              <div class="sectionTitle">
+                <b>${cat}</b>
+                <span class="dangerLink" data-delcat="${encodeURIComponent(cat)}">Удалить категорию</span>
+              </div>
+              ${chips}
+            </div>
+          `;
+                    }).join("");
+
+                    listHost.innerHTML = blocks;
+
+                    // bind delete events
+                    listHost.querySelectorAll("[data-delword]").forEach(btn => {
+                        btn.addEventListener("click", () => {
+                            const raw = btn.getAttribute("data-delword");
+                            const [cEnc, wEnc] = raw.split("||");
+                            const c = decodeURIComponent(cEnc || "");
+                            const w = decodeURIComponent(wEnc || "");
+                            deleteUserWord(c, w);
+                        });
+                    });
+                    listHost.querySelectorAll("[data-delcat]").forEach(el => {
+                        el.addEventListener("click", () => {
+                            const c = decodeURIComponent(el.getAttribute("data-delcat") || "");
+                            deleteUserCategory(c);
+                        });
+                    });
+                }
+
+                validateAndFix();
                 return;
             }
 
@@ -626,9 +1001,7 @@
                 const shown = state.reveal.shown;
 
                 root.innerHTML = `
-        <div class="center">
-          <div class="pill">Игрок ${p} из ${state.settings.players}</div>
-        </div>
+        <div class="center"><div class="pill">Игрок ${p} из ${state.settings.players}</div></div>
 
         <div class="big">
           ${!shown ? `
@@ -666,9 +1039,7 @@
                 const dir = state.round.direction ?? "cw";
 
                 root.innerHTML = `
-        <div class="center">
-          <div class="pill">Слово выбрано • Роли выданы</div>
-        </div>
+        <div class="center"><div class="pill">Слово выбрано • Роли выданы</div></div>
 
         <div class="big">
           <div class="kicker">Кто начинает и куда ходим</div>
@@ -676,9 +1047,7 @@
           <div class="sub">Направление: <b>${directionLabel(dir)}</b></div>
         </div>
 
-        <div class="note">
-          Игрок ${sp} даёт первую подсказку, дальше ходите <b>${directionLabel(dir)}</b>.
-        </div>
+        <div class="note">Игрок ${sp} даёт первую подсказку, дальше ходите <b>${directionLabel(dir)}</b>.</div>
 
         <div class="big" style="margin-top:12px;">
           <div class="kicker">Настройки</div>
@@ -703,13 +1072,9 @@
                 const dir = state.round.direction ?? "cw";
 
                 root.innerHTML = `
-        <div class="center">
-          <div class="pill">Подсказки по кругу • Не палитесь 😄</div>
-        </div>
+        <div class="center"><div class="pill">Подсказки по кругу • Не палитесь 😄</div></div>
 
-        <div class="note">
-          Старт: <b>Игрок ${sp}</b> • Направление: <b>${directionLabel(dir)}</b>
-        </div>
+        <div class="note">Старт: <b>Игрок ${sp}</b> • Направление: <b>${directionLabel(dir)}</b></div>
 
         ${timerOff ? `
           <div class="big">
@@ -740,9 +1105,7 @@
                 const voter = state.voting.currentVoter;
 
                 root.innerHTML = `
-        <div class="center">
-          <div class="pill">Голосование (передавай телефон)</div>
-        </div>
+        <div class="center"><div class="pill">Голосование (передавай телефон)</div></div>
 
         <div class="big">
           <div class="kicker">Сейчас голосует</div>
@@ -756,7 +1119,6 @@
         </div>
 
         <div class="list" id="choices"></div>
-
         <div class="hint">Голосование скрыто: предыдущие голоса не показываются.</div>
       `;
 
@@ -854,7 +1216,8 @@
             }
         }
 
-        // First load: get words.xlsx
+        // init
+        rebuildMergedWordbook();
         loadWordsFromExcel();
         render();
     })();
